@@ -157,6 +157,10 @@ slug を検証:
 下書きの段階では:
 
 - frontmatter は `published: false` で作成し、`published_at: "${PUBLISHED_AT}"`(Step 4 で予約したスロット)を入れておく。`published: false` の間は予約日時が入っていても公開されない
+- frontmatter に `cover_image` を入れない。サムネイル画像は Day 3 で生成されるため、
+  Day 1/2 段階で `cover_image` が存在しないファイルを参照すると link-check CI が落ちる
+  (2026-08 に 2 回発生し、`cover_image` を除去する追加コミットで復旧した実績がある)。
+  Day 3 の frontmatter 確認ステップで実ファイル生成後に追加する
 - 構成案レベル(各セクションの見出し + 1〜2 文の概要)を書く
 - まだコードや具体実装は書かない(Day 2 で書く)
 

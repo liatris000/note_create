@@ -6,7 +6,6 @@ topics: ["claude", "claudeapi", "python", "ai", "automation"]
 pattern: "implementation"
 published: false
 published_at: "2026-09-17 07:00"
-cover_image: https://raw.githubusercontent.com/liatris000/zenn_create/main/images/20260917-learner-stuckpoint-mining_thumbnail.png
 ---
 
 :::message
