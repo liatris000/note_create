@@ -105,4 +105,6 @@ CLI 自体を毎回本物の Claude API に投げてテストするのはコス�
 
 ## 成果物
 
-<!-- ARTIFACT_LINKS -->
+@[github](https://github.com/liatris000/liatris-20260917-learner-stuckpoint-mining)
+
+デモ: https://liatris000.github.io/liatris-20260917-learner-stuckpoint-mining/
