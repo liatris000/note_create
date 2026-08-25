@@ -18,53 +18,91 @@ published_at: "2026-09-17 07:00"
 仕組みの全貌は[こちらの設計記事](https://zenn.dev/liatris/articles/20260701-zenn-kickoff)にまとめています。
 :::
 
-<!-- Day 1 時点: 構成案レベルの下書き。コード・具体実装は Day 2 で書く。 -->
+小テストの正誤と、提出物への自由記述コメント。学習系サービスを使うほどこの2つは溜まっていくが、大半はテキストのまま流れて終わる。「どこでつまずいているか」を拾い上げる工程が無いと、ログはただのログのままだ。Claude API の構造化出力(tool use)でこの自由記述をパースし、単元 x つまずき種別で集計するところまでを実装した。
 
-## リード(構成案)
+## アーキテクチャ
 
-学習系サービスの受講ログ(小テストの正誤、提出物への質問コメント、進捗メモ等)は、
-「どこでつまずいたか」の情報を大量に含んでいるが、大半はテキストのまま溜まって
-可視化されずに終わる。ここを Claude API の構造化出力でパースし、つまずきパターンを
-検出・集計するところまでを実装する。
-
-## アーキテクチャ(構成案)
-
-- 入力: 学習ログ(小テスト結果 + 自由記述コメント)のサンプルデータ(合成データ、実データは使わない)
-- Claude API: 構造化出力(tool use / JSON Schema)で「つまずき種別」「該当単元」「確信度」を抽出
-- 集計: 単元別・種別別に集計し、つまずきが集中している箇所を可視化
-- 出力: 静的な HTML レポート(または簡易ダッシュボード)
+- 入力: 学習ログ(小テストの正誤 + 自由記述コメント)。個人情報を含まない合成データを12件用意した
+- 抽出: Claude API の tool use を `tool_choice` で強制し、単元・つまずき種別・確信度・根拠を1件ずつ構造化して抽出
+- 集計: 単元 x つまずき種別でクロス集計
+- 出力: 静的 HTML レポート(GitHub Pages でそのまま公開できる形)
 
 ```mermaid
 flowchart LR
   A[学習ログ] --> B[Claude API 構造化出力]
   B --> C[つまずき種別 + 単元 + 確信度]
-  C --> D[集計]
-  D --> E[HTMLレポート]
+  C --> D[単元 x 種別 集計]
+  D --> E[静的HTMLレポート]
 ```
 
-## 実装ステップ(構成案、Day 2 で実装)
+## 実装: つまずき種別を5種の固定カテゴリに絞る
 
-1. 合成学習ログデータの用意(個人情報を含まない、自作のダミーデータ)
-2. 抽出スキーマの設計(つまずき種別の分類軸をどう定義するか)
-3. Claude API 呼び出し(構造化出力、バッチ処理)
-4. 集計・可視化ロジック
-5. 静的レポート生成
+最初に悩んだのは、つまずき種別を固定カテゴリにするか自由記述にするかだった。自由記述にすれば個々のログのニュアンスは残せるが、その代わり「単元 x 種別」のクロス集計ができなくなる。逆に固定カテゴリだと集計はしやすいが、粒度が粗くなって情報が削られる。今回は `concept_gap`(概念理解の不足)/ `calculation_slip`(計算・手順のミス)/ `misread_instruction`(問題文の読み違い)/ `time_pressure`(時間切れ・見直し不足)/ `other` の5種に固定し、その代わり `evidence` フィールドにコメントからの引用根拠を必ず添えさせることでニュアンスの欠落を補うことにした。カテゴリは丸めるが、なぜそのカテゴリに分類したかの手がかりは残す、という折衷案になっている。
 
-## 思考プロセス(構成案)
+Pydantic モデルで抽出スキーマを定義し、`model_json_schema()` でそのまま tool 定義に変換する。
 
-- 分類軸を固定カテゴリにするか自由記述にするかで悩みそう(固定だと粒度が粗くなる、自由記述だと集計しづらい)→ Day 2 で実際に試して比較する
-- 1件ずつ API を呼ぶか、バッチでまとめて渡すかはコストとレイテンシのトレードオフになりそう
+```python:stuckpoint_mining.py
+class StuckpointRecord(BaseModel):
+    unit: str = Field(description="つまずきが起きている単元名(ログのunit_hintを踏まえて正規化する)")
+    category: str = Field(
+        description=(
+            "つまずきの種別。次のいずれか1つ: "
+            "concept_gap(概念理解の不足) / calculation_slip(計算・手順のミス) / "
+            "misread_instruction(問題文の読み違い) / time_pressure(時間切れ・見直し不足) / other(その他)"
+        )
+    )
+    confidence: float = Field(description="分類の確信度(0.0〜1.0)")
+    evidence: str = Field(description="分類根拠として引用したコメント中の一節(短く)")
 
-## データアナリスト視点(構成案、必須セクション)
 
-- 自由記述ログを構造化データに変換してから集計する、という流れは分析業務の前処理と同じ構造
-- 「つまずきの集中箇所」を可視化する発想は、異常検知やファネル分析の考え方に近い
+def _model_to_tool(model: type[BaseModel], name: str, description: str) -> dict[str, Any]:
+    schema = model.model_json_schema()
+    schema.pop("title", None)
+    return {"name": name, "description": description, "input_schema": schema}
+```
 
-## 成果物(Day 3 で追記)
+呼び出し側は `tool_choice` で対象の tool を強制し、返ってきた `tool_use` ブロックの `input` をそのまま拾う。自由テキストで返されてパースに失敗する経路を潰すための措置で、これが無いとログによってはモデルが「分類できません」と平文で返してくることがある。
 
-- GitHub リポジトリ + スクリーンショット(Day 3 で用意)
+```python:stuckpoint_mining.py
+def _call_structured(client: Any, *, system: str, user: str, tool: dict[str, Any]) -> dict[str, Any]:
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=512,
+        system=system,
+        tools=[tool],
+        tool_choice={"type": "tool", "name": tool["name"]},
+        messages=[{"role": "user", "content": user}],
+    )
+    for block in response.content:
+        if getattr(block, "type", None) == "tool_use" and block.name == tool["name"]:
+            return block.input
+    raise RuntimeError("tool_use ブロックが返らなかった(モデル or プロンプトを確認)")
+```
 
----
+ログ1件ずつに対してこの抽出を回し、`unit x category` で件数を集計する。
 
-**実装規模**: S(数時間)
-**成果物タイプ**: Python script + 静的 HTML レポート
+```python:stuckpoint_mining.py
+def aggregate(results: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    """単元 x 種別 の件数を集計する。"""
+    counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for r in results:
+        record: StuckpointRecord = r["stuckpoint"]
+        counts[record.unit][record.category] += 1
+    return {unit: dict(cats) for unit, cats in counts.items()}
+```
+
+HTML レポートは棒グラフ用の JS ライブラリを入れず、集計件数に応じて `<span>` の `width` を計算するだけにした。GitHub Pages に静的ファイルとして置くだけで完結させたかったのと、外部依存が増えるとその分壊れる箇所が増えるので、今回のデータ量(12件)なら素の HTML + インラインスタイルで十分だった。
+
+```bash
+python3 stuckpoint_mining.py --input sample_logs.json --output index.html
+```
+
+CLI 自体を毎回本物の Claude API に投げてテストするのはコストがかかるし応答も非決定的なので、テストは `anthropic.Anthropic` クライアントをモックして tool 定義の組み立てと `tool_use` のパース経路だけを確認する形にした。GitHub Pages に置いているデモレポートも、同じ発想の固定ルールベースのモック応答(`--demo` オプション)で生成している。実データを使う場合は `ANTHROPIC_API_KEY` を設定して素のモードで実行すればいい。
+
+## データアナリスト視点
+
+自由記述ログを固定カテゴリの構造化データに変換してから集計する、という流れは、分析の前処理でテキストログをディメンションに落とし込む作業とほぼ同じ形をしている。「単元 x 種別」のクロス集計でつまずきが集中している箇所を洗い出す発想も、ファネル分析でどのステップの離脱率が高いかを見るのと近い。ただしカテゴリを固定した分、`other` に落ちるログを定期的に見返して分類軸自体を見直す運用が無いと、集計結果がだんだん実態とずれていきそうだ。
+
+## 成果物
+
+<!-- ARTIFACT_LINKS -->
