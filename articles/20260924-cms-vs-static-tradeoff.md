@@ -116,4 +116,6 @@ fixtureの読み込みに差し替えるだけで実APIに繋ぎ替えられる�
 同じ構造をしている。「更新頻度」「更新者のスキル」のような具体的な変数に判断軸を
 分解しておくと、次に似たような意思決定をする時にもそのまま使い回せる。
 
-<!-- ARTIFACT_LINKS -->
+@[github](https://github.com/liatris000/liatris-20260924-cms-vs-static-tradeoff)
+
+デモ: https://liatris000.github.io/liatris-20260924-cms-vs-static-tradeoff/
