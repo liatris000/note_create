@@ -4,8 +4,9 @@ emoji: "🗂️"
 type: "tech"
 topics: ["nextjs", "cms", "staticsite", "architecture", "webdev"]
 pattern: "comparison"
-published: false
+published: true
 published_at: "2026-09-24 07:00"
+cover_image: https://raw.githubusercontent.com/liatris000/zenn_create/main/images/20260924-cms-vs-static-tradeoff_thumbnail.png
 ---
 
 :::message
