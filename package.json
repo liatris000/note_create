@@ -24,6 +24,6 @@
     "zenn-cli": "^0.4.7"
   },
   "devDependencies": {
-    "puppeteer": "^24.0.0"
+    "puppeteer": "^25.10.0"
   }
 }
