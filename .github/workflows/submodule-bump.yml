@@ -1,0 +1,123 @@
+name: business-profile の pointer 追随
+run-name: "submodule-bump (${{ github.event_name }})"
+
+# ─── なぜスケジュールなのか ──────────────────────────────────────────
+# business-profile が着地するたびに、zenn_create の gitlink を人手で進めていた。
+# 2026-09-07 の 1 セッションだけで 5 回発生し（5172791 / 59f5be0 / 8711730 /
+# 5cd17d7 / 7ac34b4）、そのたびにブランチ作成 → PR → CI 待ち → マージの往復が要る。
+#
+# 以前ローカルで自動化を試みたときは、親リポのブランチ復帰 → submodule worktree の
+# 復帰 → pointer PR 自体の再ゲート、と直すたびに新しい経路が生まれて収束しなかった
+# （personal_dotfiles#35 の項目 2）。CI で回せばローカル状態の復帰がそもそも要らない。
+#
+# 即時追随（business-profile 側から repository_dispatch）ではなく日次にしたのは、
+# 題材選定が日次で走るため即時性の価値がほぼ無く、1 日に何度着地しても PR が
+# 1 本で済むため。失敗しても翌日に自動で再試行される。
+#
+# ─── なぜ submodule を checkout しないのか ───────────────────────────
+# business-profile は PRIVATE で、GITHUB_TOKEN では読めない。
+# 必要なのは gitlink の SHA だけなので、API で main の SHA を取り、
+# `git update-index --cacheinfo` でインデックスだけ書き換える。
+# submodule の中身は要らないので、PAT の用途も「read だけ」に閉じられる。
+
+on:
+  schedule:
+    - cron: '0 22 * * *'   # 07:00 JST
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: PAT の存在確認
+        env:
+          PAT: ${{ secrets.ARTIFACT_PUBLISH_TOKEN }}
+        run: |
+          if [ -z "${PAT}" ]; then
+            echo "::error::secrets.ARTIFACT_PUBLISH_TOKEN が未設定です。business-profile は PRIVATE なので read できる PAT が要ります"
+            exit 1
+          fi
+
+      - name: 追随が要るか判定
+        id: check
+        env:
+          PAT: ${{ secrets.ARTIFACT_PUBLISH_TOKEN }}
+        run: |
+          set -euo pipefail
+          CURRENT=$(git ls-tree HEAD business-profile | awk '{print $3}')
+          LATEST=$(curl -fsSL \
+            -H "Authorization: token ${PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/liatris000/liatris-business-profile/commits/main \
+            | jq -r '.sha')
+
+          if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
+            echo "::error::business-profile の main SHA を取得できませんでした（PAT の権限を確認）"
+            exit 1
+          fi
+
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "latest=$LATEST"   >> "$GITHUB_OUTPUT"
+          if [ "$CURRENT" = "$LATEST" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "追随不要: ${CURRENT:0:7}"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "追随が要る: ${CURRENT:0:7} → ${LATEST:0:7}"
+          fi
+
+      - name: pointer を進めて PR を作る
+        if: steps.check.outputs.changed == 'true'
+        env:
+          PAT: ${{ secrets.ARTIFACT_PUBLISH_TOKEN }}
+          CURRENT: ${{ steps.check.outputs.current }}
+          LATEST: ${{ steps.check.outputs.latest }}
+        run: |
+          set -euo pipefail
+          SHORT="${LATEST:0:7}"
+          BRANCH="auto/submodule-bump-${SHORT}"
+
+          # 既に同じブランチがある（前回の PR が未着地）なら何もしない。
+          # 追い越して新しい PR を作ると、レビュー待ちの PR が積み上がる。
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "$BRANCH は既に存在します。前回の PR が未着地なのでスキップします"
+            exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q -b "$BRANCH"
+
+          # submodule の中身は要らない。gitlink（mode 160000）だけ差し替える
+          git update-index --add --cacheinfo "160000,${LATEST},business-profile"
+
+          git commit -q \
+            -m "chore: business-profile の pointer を ${SHORT} に進める" \
+            -m "${CURRENT:0:7} → ${SHORT}。日次の追随ジョブによる自動更新。" \
+            -m "題材選定（topic-selection）が読む業務プールを最新の状態に揃える。"
+
+          # PAT で push する。GITHUB_TOKEN の push は後続ワークフローを起動しないため、
+          # NG ワードスキャン等が走らず、ゲートの前提が崩れる
+          git push -q "https://x-access-token:${PAT}@github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"
+
+          {
+            printf '`%s` → `%s`\n\n' "${CURRENT:0:7}" "${SHORT}"
+            printf '日次の追随ジョブによる自動更新。題材選定（topic-selection）が読む業務プールを最新に揃える。\n\n'
+            printf 'submodule の中身は checkout せず、gitlink（mode 160000）だけを差し替えている。\n'
+          } > /tmp/pr-body.md
+
+          GH_TOKEN="$PAT" gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --head "$BRANCH" \
+            --base main \
+            --title "chore: business-profile の pointer を ${SHORT} に進める" \
+            --body-file /tmp/pr-body.md
