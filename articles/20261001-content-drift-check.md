@@ -122,4 +122,4 @@ source of truth と公開面の突き合わせは、データ基盤における�
 
 ## 成果物
 
-<!-- ARTIFACT_LINKS -->
+@[github](https://github.com/liatris000/liatris-20261001-content-drift-check)
