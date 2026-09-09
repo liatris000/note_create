@@ -4,7 +4,7 @@ emoji: "🔍"
 type: "tech"
 topics: ["claude", "claudeapi", "python", "automation", "ai"]
 pattern: "implementation"
-published: false
+published: true
 published_at: "2026-10-01 07:00"
 ---
 
