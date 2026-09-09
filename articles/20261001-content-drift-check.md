@@ -6,6 +6,7 @@ topics: ["claude", "claudeapi", "python", "automation", "ai"]
 pattern: "implementation"
 published: true
 published_at: "2026-10-01 07:00"
+cover_image: https://raw.githubusercontent.com/liatris000/zenn_create/main/images/20261001-content-drift-check_thumbnail.png
 ---
 
 :::message
